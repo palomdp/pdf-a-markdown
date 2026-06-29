@@ -4,24 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Convertidor PDF a Markdown - Optimizador de Tokens</title>
-    <!-- Tailwind CSS para un diseño limpio y moderno -->
-    <script src="https://jsdelivr.net"></script>
-    <!-- PDF.js de Mozilla para procesar el PDF en el cliente -->
-    <script src="https://cloudflare.com"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center p-6">
-
     <div class="w-full max-w-4xl bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-700">
         <header class="text-center mb-8">
             <h1 class="text-3xl font-bold text-emerald-400 mb-2">📄 PDF a Markdown Estructurado</h1>
             <p class="text-gray-400 text-sm">Reduce hasta un 90% el consumo de tokens eliminando metadatos visuales del PDF.</p>
         </header>
 
-        <!-- Zona de Carga de Archivos -->
         <div class="flex items-center justify-center w-full mb-6">
-            <label class="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl cursor-pointer hover:bg-gray-700 border-gray-600 hover:border-emerald-500 transition-colors">
-                <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                    <svg class="w-10 h-10 mb-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://w3.org"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            <label id="drop-zone" class="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl cursor-pointer hover:bg-gray-700 border-gray-600 hover:border-emerald-500 transition-colors">
+                <div class="flex flex-col items-center justify-center pt-5 pb-6 pointer-events-none">
+                    <svg class="w-10 h-10 mb-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                     <p class="mb-2 text-sm text-gray-300"><span class="font-semibold">Haz clic para cargar</span> o arrastra tu PDF</p>
                     <p class="text-xs text-gray-500">PDF (Procesamiento local y seguro en tu navegador)</p>
                 </div>
@@ -29,10 +25,8 @@
             </label>
         </div>
 
-        <!-- Barra de Estado / Progreso -->
         <div id="status" class="text-center font-medium text-emerald-400 mb-4 hidden">Procesando documento...</div>
 
-        <!-- Área de Resultados -->
         <div class="space-y-4">
             <div class="flex justify-between items-center">
                 <h2 class="text-lg font-semibold text-gray-200">Vista Previa de Markdown:</h2>
@@ -44,81 +38,115 @@
         </div>
     </div>
 
-    <!-- Lógica de Conversión -->
     <script>
-        // Configurar el worker de PDF.js
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cloudflare.com';
-
+        // Configurar el worker de PDF.js con la ruta oficial correcta
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
         const pdfInput = document.getElementById('pdf-input');
+        const dropZone = document.getElementById('drop-zone');
         const markdownOutput = document.getElementById('markdown-output');
         const downloadBtn = document.getElementById('download-btn');
         const statusDiv = document.getElementById('status');
+        
         let convertedText = "";
+        let currentFileName = "documento.md";
 
-        pdfInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+        // Función estandarizada para procesar el archivo proveniente del clic o del arrastre
+        const processFile = (file) => {
+            if (!file || file.type !== "application/pdf") {
+                statusDiv.classList.remove('hidden');
+                statusDiv.classList.replace('text-emerald-400', 'text-red-400');
+                statusDiv.innerText = "Por favor, proporcione un archivo PDF válido.";
+                return;
+            }
 
+            currentFileName = file.name.replace('.pdf', '.md');
             statusDiv.classList.remove('hidden');
+            statusDiv.classList.replace('text-red-400', 'text-emerald-400');
             statusDiv.innerText = "Leyendo archivo PDF...";
             markdownOutput.value = "";
             downloadBtn.disabled = true;
 
             const reader = new FileReader();
+            
             reader.onload = async function () {
                 try {
                     const typedarray = new Uint8Array(this.result);
                     const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    
                     let markdownResult = `# ${file.name.replace('.pdf', '')}\n\n`;
-
                     statusDiv.innerText = `Procesando ${pdf.numPages} páginas...`;
-
+                    
                     for (let i = 1; i <= pdf.numPages; i++) {
                         const page = await pdf.getPage(i);
                         const textContent = await page.getTextContent();
-                        
                         markdownResult += `## Página ${i}\n\n`;
                         
                         let lastY = -1;
                         let pageText = "";
-
-                        // Algoritmo semántico básico para agrupar líneas y detectar saltos
+                        
                         for (const item of textContent.items) {
-                            // Detectar si el texto cambia de renglón de forma abrupta
                             if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
                                 pageText += "\n";
                             }
-                            
-                            // Si parece un título por mayúsculas o aislamiento, marcar jerarquía
                             let str = item.str;
                             pageText += str + " ";
                             lastY = item.transform[5];
                         }
                         
-                        // Limpieza de espacios redundantes y saltos innecesarios
                         markdownResult += pageText.replace(/ {2,}/g, ' ').trim() + "\n\n---\n\n";
                     }
-
+                    
                     convertedText = markdownResult;
                     markdownOutput.value = convertedText;
                     downloadBtn.disabled = false;
                     statusDiv.innerText = "¡Conversión completada con éxito!";
                 } catch (error) {
-                    console.error(error);
-                    statusDiv.innerText = "Error al procesar el archivo PDF.";
+                    console.error("Error detallado:", error);
+                    statusDiv.classList.replace('text-emerald-400', 'text-red-400');
+                    statusDiv.innerText = "Error al procesar el archivo PDF. Documento incompatible o dañado.";
                 }
             };
+            
             reader.readAsArrayBuffer(file);
+        };
+
+        // Escucha del evento: Selección de archivo mediante el botón
+        pdfInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                processFile(e.target.files[0]);
+            }
         });
 
-        // Función de descarga del archivo .md
+        // Escucha de eventos: Intercepción de Arrastrar y Soltar (Drag & Drop)
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault(); // Previene que el navegador abra el archivo directamente
+            dropZone.classList.add('border-emerald-500', 'bg-gray-700');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-emerald-500', 'bg-gray-700');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault(); // Previene que el navegador abra el archivo directamente
+            dropZone.classList.remove('border-emerald-500', 'bg-gray-700');
+            
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                processFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        // Escucha del evento: Botón de descarga
         downloadBtn.addEventListener('click', () => {
             if (!convertedText) return;
+            
             const blob = new Blob([convertedText], { type: 'text/markdown;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = pdfInput.files[0].name.replace('.pdf', '.md');
+            a.download = currentFileName;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
